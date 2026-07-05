@@ -34,6 +34,7 @@ import {
 	getConfigValueEnvVarNames,
 	isCommandConfigValue,
 	isConfigValueConfigured,
+	resolveConfigValue,
 	resolveConfigValueOrThrow,
 	resolveConfigValueUncached,
 	resolveHeadersOrThrow,
@@ -500,9 +501,11 @@ export class ModelRegistry {
 			const modelOverrides = new Map<string, Map<string, ModelOverride>>();
 
 			for (const [providerName, providerConfig] of Object.entries(config.providers)) {
-				if (providerConfig.baseUrl || providerConfig.compat) {
+				const resolvedBaseUrl =
+					providerConfig.baseUrl !== undefined ? resolveConfigValue(providerConfig.baseUrl) : undefined;
+				if (resolvedBaseUrl || providerConfig.compat) {
 					overrides.set(providerName, {
-						baseUrl: providerConfig.baseUrl,
+						baseUrl: resolvedBaseUrl,
 						compat: providerConfig.compat,
 					});
 				}
@@ -601,7 +604,11 @@ export class ModelRegistry {
 				const api = modelDef.api ?? providerConfig.api ?? builtInDefaults?.api;
 				if (!api) continue;
 
-				const baseUrl = modelDef.baseUrl ?? providerConfig.baseUrl ?? builtInDefaults?.baseUrl;
+				const resolvedModelBaseUrl =
+					modelDef.baseUrl !== undefined ? resolveConfigValue(modelDef.baseUrl) : undefined;
+				const resolvedProviderBaseUrl =
+					providerConfig.baseUrl !== undefined ? resolveConfigValue(providerConfig.baseUrl) : undefined;
+				const baseUrl = resolvedModelBaseUrl ?? resolvedProviderBaseUrl ?? builtInDefaults?.baseUrl;
 				if (!baseUrl) continue;
 
 				const compat = mergeCompat(providerConfig.compat, modelDef.compat);
@@ -919,16 +926,19 @@ export class ModelRegistry {
 			this.models = this.models.filter((m) => m.provider !== providerName);
 
 			// Parse and add new models
+			const resolvedConfigBaseUrl = config.baseUrl !== undefined ? resolveConfigValue(config.baseUrl) : undefined;
 			for (const modelDef of config.models) {
 				const api = modelDef.api || config.api;
 				this.storeModelHeaders(providerName, modelDef.id, modelDef.headers);
 
+				const resolvedModelBaseUrl =
+					modelDef.baseUrl !== undefined ? resolveConfigValue(modelDef.baseUrl) : undefined;
 				this.models.push({
 					id: modelDef.id,
 					name: modelDef.name,
 					api: api as Api,
 					provider: providerName,
-					baseUrl: modelDef.baseUrl ?? config.baseUrl!,
+					baseUrl: resolvedModelBaseUrl ?? resolvedConfigBaseUrl ?? config.baseUrl!,
 					reasoning: modelDef.reasoning,
 					thinkingLevelMap: modelDef.thinkingLevelMap,
 					input: modelDef.input as ("text" | "image")[],
@@ -949,11 +959,12 @@ export class ModelRegistry {
 			}
 		} else if (config.baseUrl || config.headers) {
 			// Override-only: update baseUrl for existing models. Request headers are resolved per request.
+			const resolvedBaseUrl = config.baseUrl !== undefined ? resolveConfigValue(config.baseUrl) : undefined;
 			this.models = this.models.map((m) => {
 				if (m.provider !== providerName) return m;
 				return {
 					...m,
-					baseUrl: config.baseUrl ?? m.baseUrl,
+					baseUrl: resolvedBaseUrl ?? m.baseUrl,
 				};
 			});
 		}

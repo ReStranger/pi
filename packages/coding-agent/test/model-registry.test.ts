@@ -13,6 +13,7 @@ import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { clearApiKeyCache, ModelRegistry, type ProviderConfigInput } from "../src/core/model-registry.ts";
+import { clearConfigValueCache } from "../src/core/resolve-config-value.ts";
 
 describe("ModelRegistry", () => {
 	let tempDir: string;
@@ -31,6 +32,7 @@ describe("ModelRegistry", () => {
 			rmSync(tempDir, { recursive: true });
 		}
 		clearApiKeyCache();
+		clearConfigValueCache();
 		vi.restoreAllMocks();
 	});
 
@@ -217,6 +219,150 @@ describe("ModelRegistry", () => {
 			registry.refresh();
 
 			expect(getModelsForProvider(registry, "anthropic")[0].baseUrl).toBe("https://second-proxy.example.com/v1");
+		});
+	});
+
+	describe("baseUrl command/env expansion", () => {
+		test("baseUrl with ! prefix executes command and uses stdout for override", () => {
+			writeRawModelsJson({
+				anthropic: overrideConfig("!echo https://command-proxy.example.com/v1"),
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const anthropicModels = getModelsForProvider(registry, "anthropic");
+
+			expect(anthropicModels.length).toBeGreaterThan(1);
+			for (const model of anthropicModels) {
+				expect(model.baseUrl).toBe("https://command-proxy.example.com/v1");
+			}
+		});
+
+		test("baseUrl with ! prefix executes command for custom models", () => {
+			writeRawModelsJson({
+				"custom-provider": providerConfig("!echo https://command-proxy.example.com/v1", [{ id: "test-model" }]),
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("custom-provider", "test-model");
+
+			expect(model).toBeDefined();
+			expect(model!.baseUrl).toBe("https://command-proxy.example.com/v1");
+		});
+
+		test("baseUrl with $ env var interpolation resolves to env value for override", () => {
+			const originalEnv = process.env.TEST_BASE_URL_ENV_12345;
+			process.env.TEST_BASE_URL_ENV_12345 = "https://env-proxy.example.com/v1";
+
+			try {
+				writeRawModelsJson({
+					anthropic: overrideConfig("$TEST_BASE_URL_ENV_12345"),
+				});
+
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+				const anthropicModels = getModelsForProvider(registry, "anthropic");
+
+				expect(anthropicModels.length).toBeGreaterThan(1);
+				for (const model of anthropicModels) {
+					expect(model.baseUrl).toBe("https://env-proxy.example.com/v1");
+				}
+			} finally {
+				if (originalEnv === undefined) {
+					delete process.env.TEST_BASE_URL_ENV_12345;
+				} else {
+					process.env.TEST_BASE_URL_ENV_12345 = originalEnv;
+				}
+			}
+		});
+
+		test("baseUrl with braced env syntax resolves to env value for custom models", () => {
+			const originalEnv = process.env.TEST_BRACED_BASE_URL_12345;
+			process.env.TEST_BRACED_BASE_URL_12345 = "https://braced-env-proxy.example.com/v1";
+			const bracedUrl = "$" + "{TEST_BRACED_BASE_URL_12345}";
+
+			try {
+				writeRawModelsJson({
+					"custom-provider": providerConfig(bracedUrl, [{ id: "test-model" }]),
+				});
+
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+				const model = registry.find("custom-provider", "test-model");
+
+				expect(model).toBeDefined();
+				expect(model!.baseUrl).toBe("https://braced-env-proxy.example.com/v1");
+			} finally {
+				if (originalEnv === undefined) {
+					delete process.env.TEST_BRACED_BASE_URL_12345;
+				} else {
+					process.env.TEST_BRACED_BASE_URL_12345 = originalEnv;
+				}
+			}
+		});
+
+		test("baseUrl with ! prefix handles multiline output (uses trimmed result)", () => {
+			writeRawModelsJson({
+				"custom-provider": providerConfig("!printf 'https://multiline-proxy.example.com\\n/v1'", [
+					{ id: "test-model" },
+				]),
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("custom-provider", "test-model");
+
+			expect(model).toBeDefined();
+			expect(model!.baseUrl).toBe("https://multiline-proxy.example.com\n/v1");
+		});
+
+		test("baseUrl with ! prefix falls back to built-in URL when command fails", () => {
+			writeRawModelsJson({
+				anthropic: overrideConfig("!exit 1"),
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const anthropicModels = getModelsForProvider(registry, "anthropic");
+
+			// Should have models with their original (built-in) baseUrl
+			expect(anthropicModels.length).toBeGreaterThan(0);
+			// The models should not have the command string as their baseUrl
+			for (const model of anthropicModels) {
+				expect(model.baseUrl).not.toBe("!exit 1");
+				expect(model.baseUrl).toBeTruthy();
+			}
+		});
+
+		test("model-level baseUrl with ! prefix supersedes provider-level baseUrl", () => {
+			writeRawModelsJson({
+				"custom-provider": {
+					baseUrl: "!echo https://provider-level.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [
+						{
+							id: "default-model",
+							reasoning: false,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 100000,
+							maxTokens: 8000,
+						},
+						{
+							id: "override-model",
+							baseUrl: "!echo https://model-level.example.com/v1",
+							reasoning: false,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 100000,
+							maxTokens: 8000,
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+			expect(registry.find("custom-provider", "default-model")!.baseUrl).toBe(
+				"https://provider-level.example.com/v1",
+			);
+			expect(registry.find("custom-provider", "override-model")!.baseUrl).toBe("https://model-level.example.com/v1");
 		});
 	});
 
