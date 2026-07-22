@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -26,7 +28,11 @@ for (const arg of args) {
 }
 
 function readJson(path) {
-	return JSON.parse(readFileSync(path, "utf8"));
+	try {
+		return JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		throw new Error(`Failed to read or parse ${path}: ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 function packageDependencies(entry) {
@@ -129,6 +135,44 @@ function registryTarballUrl(packageName, version) {
 	return `https://registry.npmjs.org/${packageName}/-/${tarballName}-${version}.tgz`;
 }
 
+async function fetchRegistryIntegrity(name, version) {
+	const url = `https://registry.npmjs.org/${name}/${version}`;
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return undefined;
+		const data = await res.json();
+		return data?.dist?.integrity;
+	} catch {
+		return undefined;
+	}
+}
+
+function computeLocalIntegrity(workspaceDir) {
+	let tarballName;
+	try {
+		tarballName = execSync("npm pack --pack-destination /tmp", {
+			cwd: workspaceDir,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+	} catch (error) {
+		throw new Error(`npm pack failed in ${workspaceDir}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+
+	const tarballPath = join("/tmp", tarballName);
+	try {
+		const buf = readFileSync(tarballPath);
+		const hash = createHash("sha512").update(buf).digest("base64");
+		return `sha512-${hash}`;
+	} finally {
+		try {
+			unlinkSync(tarballPath);
+		} catch {
+			// ignore cleanup errors
+		}
+	}
+}
+
 function getInternalWorkspaces(lockPackages) {
 	const workspaces = new Map();
 
@@ -192,11 +236,16 @@ function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
 	);
 }
 
-function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, workspace) {
+function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, workspace, integrityMap) {
 	const packageJson = workspace.packageJson;
 	const outputPath = `node_modules/${name}`;
 	const entry = copyPackageJsonEntry(packageJson, { includeName: false });
 	entry.resolved = registryTarballUrl(name, packageJson.version);
+
+	const integrity = integrityMap?.get(name);
+	if (integrity) {
+		entry.integrity = integrity;
+	}
 
 	shrinkwrapPackages[outputPath] = sortedPackageEntry(entry);
 	addedPaths.add(outputPath);
@@ -287,7 +336,7 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 	}
 }
 
-function generateShrinkwrap() {
+async function generateShrinkwrap() {
 	const rootLock = readJson(rootLockfilePath);
 	if (rootLock.lockfileVersion !== 3 || !rootLock.packages) {
 		throw new Error("package-lock.json must be lockfileVersion 3 and contain a packages map");
@@ -296,6 +345,30 @@ function generateShrinkwrap() {
 	const lockPackages = rootLock.packages;
 	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
 	const internalWorkspaces = getInternalWorkspaces(lockPackages);
+
+	// Pre-fetch integrity for internal workspace packages
+	const workspaceIntegrity = new Map();
+	const integrityTasks = [];
+	for (const [name, ws] of internalWorkspaces) {
+		const version = ws.packageJson.version;
+		integrityTasks.push(
+			(async () => {
+				let integrity = await fetchRegistryIntegrity(name, version);
+				if (!integrity) {
+					try {
+						integrity = computeLocalIntegrity(join(repoRoot, ws.lockPath));
+					} catch {
+						console.warn(`Warning: could not determine integrity for ${name}@${version}`);
+					}
+				}
+				if (integrity) {
+					workspaceIntegrity.set(name, integrity);
+				}
+			})(),
+		);
+	}
+	await Promise.all(integrityTasks);
+
 	const shrinkwrapPackages = {
 		"": copyPackageJsonEntry(codingAgentPackage, { includeName: true }),
 	};
@@ -314,7 +387,7 @@ function generateShrinkwrap() {
 			const outputPath = `node_modules/${item.name}`;
 			internalNames.add(item.name);
 			if (!addedPaths.has(outputPath)) {
-				addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, item.name, workspace);
+				addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, item.name, workspace, workspaceIntegrity);
 			}
 			continue;
 		}
@@ -335,7 +408,7 @@ function generateShrinkwrap() {
 }
 
 try {
-	const shrinkwrap = generateShrinkwrap();
+	const shrinkwrap = await generateShrinkwrap();
 	const content = `${JSON.stringify(shrinkwrap, null, "\t")}\n`;
 
 	if (checkOnly) {
