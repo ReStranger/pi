@@ -1410,9 +1410,17 @@ export abstract class TuiBase extends Container implements TUI {
 		return result;
 	}
 
-	protected applyLineResets(lines: string[]): string[] {
+	/**
+	 * Append a segment reset to every line in `[start, end)` and normalize its terminal output.
+	 *
+	 * Mutates `lines` in place and returns the same array. Callers that only write a subset of
+	 * the buffer can pass that range instead of paying for the whole buffer every frame.
+	 */
+	protected applyLineResets(lines: string[], start = 0, end = lines.length): string[] {
 		const reset = SEGMENT_RESET;
-		for (let i = 0; i < lines.length; i++) {
+		const from = start > 0 ? start : 0;
+		const to = end < lines.length ? end : lines.length;
+		for (let i = from; i < to; i++) {
 			const line = lines[i];
 			if (!isImageLine(line)) {
 				lines[i] = normalizeTerminalOutput(line) + reset;
