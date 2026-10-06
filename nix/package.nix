@@ -117,7 +117,11 @@ stdenv.mkDerivation (finalAttrs: {
     runHook preInstall
 
     mkdir -p "$out/lib/pi" "$out/bin"
-    cp -R . "$out/lib/pi"
+    cp -R node_modules "$out/lib/pi"
+
+    find "$out/lib/pi/node_modules" \
+      \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \) -delete
+    rm -rf "$out/lib/pi/node_modules/@types"
 
     makeWrapper ${lib.getExe nodejs} "$out/bin/pi" \
       --add-flags "$out/lib/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
