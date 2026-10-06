@@ -119,7 +119,7 @@ stdenv.mkDerivation {
     mkdir -p "$out/lib/pi" "$out/bin"
     cp -R . "$out/lib/pi"
 
-    makeWrapper ${nodejs}/bin/node "$out/bin/pi" \
+    makeWrapper ${lib.getExe nodejs} "$out/bin/pi" \
       --add-flags "$out/lib/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
       --prefix PATH : ${
         lib.makeBinPath (
@@ -142,11 +142,11 @@ stdenv.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
     test "$("$out/bin/pi" --version)" = "${packageJson.version}"
-    ${nodejs}/bin/node -e \
+    ${lib.getExe nodejs} -e \
       "require('$out/lib/pi/node_modules/esbuild').transformSync('const value: number = 1', { loader: 'ts' })"
     # Load host-platform TUI helpers directly so missing native dependencies
     # fail the build rather than silently disabling clipboard support.
-    ${nodejs}/bin/node -e \
+    ${lib.getExe nodejs} -e \
       "const fs = require('node:fs');
        const path = require('node:path');
        const dir = '$out/lib/pi/node_modules/@earendil-works/pi-tui/native/' + process.platform + '/prebuilds/' + process.platform + '-' + process.arch;
@@ -155,7 +155,7 @@ stdenv.mkDerivation {
            if (file.endsWith('.node')) require(path.join(dir, file));
          }
        }"
-    ${nodejs}/bin/node -e \
+    ${lib.getExe nodejs} -e \
       "require('$out/lib/pi/node_modules/@silvia-odwyer/photon-node')"
     runHook postInstallCheck
   '';
