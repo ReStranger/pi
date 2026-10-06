@@ -91,7 +91,7 @@ let
     };
   };
 in
-stdenv.mkDerivation {
+stdenv.mkDerivation (finalAttrs: {
   pname = "pi";
   inherit (packageJson) version;
   src = installLock;
@@ -164,7 +164,7 @@ stdenv.mkDerivation {
     description = packageJson.description;
     homepage = "https://pi.dev";
     license = lib.licenses.mit;
-    mainProgram = "pi";
+    mainProgram = finalAttrs.pname;
     platforms = [
       "aarch64-darwin"
       "aarch64-linux"
@@ -176,4 +176,4 @@ stdenv.mkDerivation {
       binaryNativeCode
     ];
   };
-}
+})
