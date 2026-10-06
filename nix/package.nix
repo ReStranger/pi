@@ -2,6 +2,7 @@
   autoPatchelfHook,
   fd,
   fetchurl,
+  git,
   importNpmLock,
   lib,
   libxcb,
@@ -20,6 +21,7 @@ let
     removePrefix
     optionals
     getExe
+    getExe'
     makeBinPath
     licenses
     sourceTypes
@@ -50,6 +52,21 @@ let
       nodejs
       importNpmLock.npmConfigHook
     ];
+
+    postPatch = ''
+      substituteInPlace packages/coding-agent/src/modes/rpc/rpc-client.ts \
+        --replace-fail 'spawn("node", [cliPath' 'spawn("${getExe nodejs}", [cliPath'
+
+      substituteInPlace packages/coding-agent/src/package-manager-cli.ts \
+        --replace-fail 'spawnProcess("npm", ' 'spawnProcess("${getExe' nodejs "npm"}", '
+
+      substituteInPlace packages/coding-agent/src/core/package-manager.ts \
+        --replace-fail 'command: "npm"' 'command: "${getExe' nodejs "npm"}"' \
+        --replace-fail 'this.runCommand("git", ' 'this.runCommand("${getExe git}", '
+
+      substituteInPlace packages/coding-agent/src/core/footer-data-provider.ts \
+        --replace-fail '"git",' '"${getExe git}",'
+    '';
 
     buildPhase = ''
       runHook preBuild
@@ -134,7 +151,6 @@ stdenv.mkDerivation (finalAttrs: {
       --prefix PATH : ${
         makeBinPath (
           [
-            nodejs
             fd
             ripgrep
           ]
