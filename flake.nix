@@ -2,20 +2,16 @@
   description = "Pi coding agent";
 
   inputs = {
+    flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # nixpkgs unstable no longer supports Intel macOS. Keep using the final
     # Darwin branch that does so for pi's x86_64-darwin package.
     nixpkgs-darwin-x64.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
-
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      nixpkgs-darwin-x64,
-    }:
+    inputs@{ flake-parts, ... }:
     let
       systems = [
         "aarch64-darwin"
@@ -23,28 +19,48 @@
         "x86_64-darwin"
         "x86_64-linux"
       ];
-      nixpkgsFor = system: (if system == "x86_64-darwin" then nixpkgs-darwin-x64 else nixpkgs).legacyPackages.${system};
-      packageFor = system: (nixpkgsFor system).callPackage ./nix/package.nix { source = self; };
-      lib = nixpkgs.lib;
-      forAllSystems = lib.genAttrs systems;
     in
-    {
-      packages = forAllSystems (system: {
-        default = packageFor system;
-        pi = packageFor system;
-      });
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ inputs.flake-parts.flakeModules.easyOverlay ];
 
-      apps = forAllSystems (system: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.default}/bin/pi";
-          meta.description = "Pi coding agent";
+      inherit systems;
+
+      perSystem =
+        {
+          config,
+          inputs',
+          lib,
+          self',
+          system,
+          ...
+        }:
+        let
+          pkgs =
+            (if system == "x86_64-darwin" then inputs'.nixpkgs-darwin-x64 else inputs'.nixpkgs).legacyPackages;
+
+          pi = pkgs.callPackage ./nix/package.nix {
+            source = inputs.self;
+            platforms = systems;
+          };
+        in
+        {
+          _module.args.pkgs = pkgs;
+
+          overlayAttrs.pi = pi;
+
+          packages = {
+            default = pi;
+            pi = pi;
+          };
+
+          apps = {
+            default = {
+              type = "app";
+              program = "${lib.getExe self'.packages.default}";
+              meta.description = pi.meta.description;
+            };
+            pi = config.apps.default;
+          };
         };
-        pi = self.apps.${system}.default;
-      });
-
-      overlays.default = final: _previous: {
-        pi = final.callPackage ./nix/package.nix { source = self; };
-      };
     };
 }

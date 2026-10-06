@@ -9,6 +9,7 @@
   makeBinaryWrapper,
   nodejs_22,
   ripgrep,
+  platforms,
   source,
   stdenv,
   wl-clipboard,
@@ -192,12 +193,7 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://pi.dev";
     license = licenses.mit;
     mainProgram = finalAttrs.pname;
-    platforms = [
-      "aarch64-darwin"
-      "aarch64-linux"
-      "x86_64-darwin"
-      "x86_64-linux"
-    ];
+    inherit platforms;
     sourceProvenance = with sourceTypes; [
       fromSource
       binaryNativeCode
