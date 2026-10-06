@@ -5,7 +5,7 @@
   importNpmLock,
   lib,
   libxcb,
-  makeWrapper,
+  makeBinaryWrapper,
   nodejs_22,
   ripgrep,
   source,
@@ -102,7 +102,7 @@ stdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     nodejs
     importNpmLock.npmConfigHook
-    makeWrapper
+    makeBinaryWrapper
   ]
   ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
 
@@ -120,7 +120,7 @@ stdenv.mkDerivation (finalAttrs: {
       \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \) -delete
     rm -rf "$out/lib/pi/node_modules/@types"
 
-    makeWrapper ${lib.getExe nodejs} "$out/bin/pi" \
+    makeBinaryWrapper ${lib.getExe nodejs} "$out/bin/pi" \
       --add-flags "$out/lib/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
       --prefix PATH : ${
         lib.makeBinPath (
