@@ -111,7 +111,6 @@ stdenv.mkDerivation {
     libxcb
   ];
 
-  dontBuild = true;
   dontStrip = true;
 
   installPhase = ''
