@@ -7,8 +7,10 @@
   lib,
   libxcb,
   makeBinaryWrapper,
-  nodejs_22,
   ripgrep,
+  nodejs,
+  packageJson,
+  platforms,
   source,
   stdenv,
   wl-clipboard,
@@ -26,8 +28,6 @@ let
     licenses
     sourceTypes
     ;
-  nodejs = nodejs_22;
-  packageJson = importJSON (source + "/packages/coding-agent/package.json");
   # Lockfile root used by the pi.dev installer. It pins the coding agent's
   # runtime dependency tree and is kept in sync with package-lock.json by
   # `npm run check`.
@@ -184,16 +184,11 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   meta = {
-    description = packageJson.description;
+    inherit (packageJson) description;
     homepage = "https://pi.dev";
     license = licenses.mit;
     mainProgram = finalAttrs.pname;
-    platforms = [
-      "aarch64-darwin"
-      "aarch64-linux"
-      "x86_64-darwin"
-      "x86_64-linux"
-    ];
+    inherit platforms;
     sourceProvenance = with sourceTypes; [
       fromSource
       binaryNativeCode
