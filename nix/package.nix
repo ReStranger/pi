@@ -146,6 +146,7 @@ stdenv.mkDerivation (finalAttrs: {
 
     makeBinaryWrapper ${lib.getExe nodejs} "$out/bin/pi" \
       --add-flags "$out/lib/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
+      --suffix PATH : ${lib.makeBinPath [ nodejs ]} \
       --prefix PATH : ${
         makeBinPath (
           [
